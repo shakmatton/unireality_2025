@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta charset="UTF-8">
+  <title>UNIREALITY - Pensamento Computacional - Seleção de Jogadores</title>
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Sans+Extra+Condensed:wght@500&family=Fira+Sans+Extra+Condensed:ital,wght@1,500&display=swap" rel="stylesheet">
+  <style>
+    /* Estilo para a tela de pré-créditos (overlay) */
+    #startScreen {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background-color: rgba(0, 0, 0, 0.85); /* fundo preto com transparência 0.85 */
+      backdrop-filter: blur(5px);
+      -webkit-backdrop-filter: blur(5px);
+      display: flex;
+      flex-direction: column;
+      justify-content: center; /* centraliza verticalmente */
+      align-items: center;
+      padding: 20px;
+      z-index: 1000;
+      gap: 20px;
+    }
+    /* Container de informações (título, subtítulo e créditos) */
+    #info {
+      text-align: center;
+      color: #fff;
+      width: 100%;
+      max-width: 600px;
+    }
+    #info h1 {
+      margin: 0;
+      font-size: 2.5em;
+    }
+    #info p {
+      font-size: 1.5em;
+      margin: 10px 0;
+    }
+    /* Seção de créditos */
+    #creditsSection {
+      margin-top: 20px;
+    }
+    #creditsSection h2 {
+      font-size: 1.8em;
+      margin-bottom: 16px;
+      margin-top: 62px;
+    }
+    #creditsSection ul {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+      font-size: 1.2em;
+    }
+    #creditsSection ul li {
+      margin: 5px 0;
+    }
+    /* Ano */
+    #year {
+      font-size: 1.5em;
+      color: #fff;
+      margin-bottom: 30px;
+      margin-top: -15px;
+    }
+    /* Container do botão Iniciar */
+    #startButtonContainer {
+      width: 100%;
+      display: flex;
+      justify-content: center;
+    }
+    /* Botão Iniciar com estilo similar aos botões dos players */
+    #startButton {
+      background-color: #000000; /* Preto */
+      color: #ffffff; /* Branco */
+      font-size: 2.5em;
+      padding: 20px;
+      border: 1px solid #ffffff; /* Borda branca fina */
+      border-radius: 17px;
+      font-family: 'Fira Sans Extra Condensed', sans-serif;
+      font-weight: 500;
+      font-style: italic;
+      cursor: pointer;
+      transition: transform 0.3s, background-color 0.3s, color 0.3s, border-color 0.3s;
+      width: 100%;
+      max-width: 300px;
+      box-sizing: border-box;
+    }
+    #startButton:hover {
+      background-color: #fcba2c; /* Dourado */
+      color: #000000; /* Preto */
+      transform: scale(1.05);
+      border-color: transparent; /* Remove a borda no hover */
+    }
+    
+    /* Estilos originais do conteúdo principal */
+    body {
+      font-family: 'Fira Sans Extra Condensed', sans-serif;
+      background-image: url('./background_1.jpg');
+      background-size: cover;
+      background-position: center;
+      background-repeat: no-repeat;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      flex-direction: column;
+      font-weight: 500;
+      font-style: italic;
+    }
+    .container {
+      text-align: center;
+      width: 80%;
+      max-width: 500px;
+      background-color: rgba(255, 255, 255, 0.7);
+      padding: 10px;
+      border-radius: 33px;
+    }
+    .container h1 {
+      font-size: 3em;
+      color: #ca870a;
+      margin: 0;            
+    }
+    .container h2 {
+      font-size: 1.5em;
+      color: #555;
+      margin-top: 10px;
+      margin-bottom: 20px;
+    }
+    .button-container {
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+      width: 100%;
+    }
+    .button-wrapper {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+      gap: 10px;
+      width: 100%;
+    }
+    .button {
+      background-color: #007bff;
+      color: white;
+      padding: 20px;
+      border: none;
+      border-radius: 17px;
+      font-size: 1.7em;
+      cursor: pointer;
+      transition: transform 0.3s, background-color 0.3s;
+      width: 100%;
+      max-width: 300px;
+      font-family: 'Fira Sans Extra Condensed', sans-serif;
+      font-weight: 500;
+      font-style: italic;
+    }
+    .button:hover {
+      background-color: #fcba2c;
+      color: #000000;
+      transform: scale(1.05);
+    }
+    .player-image-1 img,
+    .player-image-2 img {
+      width: 100%;
+      max-width: 300px;
+      height: auto;
+      object-fit: contain;
+      object-position: center;
+      cursor: pointer;
+      transition: transform 0.3s;
+    }
+    .player-image-1 img:hover,
+    .player-image-2 img:hover {
+      transform: scale(1.05);
+    }
+    @media (min-width: 601px) {
+      .container {
+        width: 90%;
+        max-width: 1080px;
+        padding: 23px;
+      }
+      .container h1 {
+        font-size: 4em;
+      }
+      .container h2 {
+        font-size: 2em;
+        margin-bottom: 45px;
+      }
+      .button-container {
+        flex-direction: row;
+        gap: 40px;
+      }
+      .button {
+        font-size: 2em;
+        padding: 20px;
+        max-width: 400px;
+      }
+      .player-image-1 img,
+      .player-image-2 img {
+        max-width: 400px;
+      }
+    }
+    @media (max-width: 600px) {
+      /* Ajustes específicos para mobile */
+      #startScreen {
+        padding: 0px;
+        align-items: center;
+        text-align: center;
+      }
+      #info h1 {
+        font-size: 2em;
+      }
+      #info p {
+        font-size: 1.1em;
+      }
+      #creditsSection h2 {
+        font-size: 1.5em;
+      }
+      #creditsSection ul {
+        font-size: 1em;
+      }
+      #startButton {
+        font-size: 2.5em;
+        padding: 15px;
+      }
+      #year {
+        font-size: 1.135em;
+      }
+    }
+  </style>
+</head>
+<body>
+  <!-- Tela de pré-créditos (overlay) -->
+  <div id="startScreen">
+    <div id="info">
+      <h1>UNIREALITY++</h1>
+      <p>Experiências interativas em Realidade Aumentada</p>
+      <div id="creditsSection">
+        <h2>Créditos:</h2>
+        <ul>
+          <li>Iuri Francisco Mustafa Cordeiro</li>
+          <li>Lukas Gabriel Godoy</li>
+          <li>Raphael Espíndola Pereira</li>
+          <br><br>
+          <li>Ciência da Computação — UNIOESTE</li>          
+        </ul>
+      </div>
+    </div>
+    <!-- Ano inserido entre os créditos e o botão Iniciar -->
+    <p id="year">2025</p>
+    <div id="startButtonContainer">
+      <button id="startButton" onclick="iniciar()">Iniciar</button>
+    </div>
+  </div>
+  
+  <!-- Áudio com preload para minimizar delay -->
+  <audio id="bgAudio" loop muted preload="auto">
+    <source src="./song.mp3" type="audio/mp3">                              <!-- The Journeyman Project - Good Morning Caldoria.mp3 -->
+    Seu navegador não suporta o elemento de áudio.
+  </audio>
+  
+  <div class="container">
+    <h1>UNIREALITY++</h1>
+    <h2>PENSAMENTO COMPUTACIONAL</h2>
+    <div class="button-container">
+      <div class="button-wrapper">
+        <div class="player-image-1">
+          <a href="player1/index.html"><img src="Player1.png" alt="Imagem do Jogador 1"></a>
+        </div> 
+        <button class="button" onclick="selectPlayer(1)">Jogador 1</button>
+      </div>
+      <div class="button-wrapper">
+        <div class="player-image-2">
+          <a href="player2/index.html"><img src="Player2.png" alt="Imagem do Jogador 2"></a>
+        </div> 
+        <button class="button" onclick="selectPlayer(2)">Jogador 2</button>
+      </div>
+    </div>        
+  </div>
+
+  <script>
+    function iniciar() {
+      // Esconde a tela de pré-créditos
+      document.getElementById('startScreen').style.display = 'none';
+      // Desmutar e iniciar o áudio (já pré-carregado)
+      var audio = document.getElementById("bgAudio");
+      audio.muted = false;
+      audio.play();
+    }
+
+    function selectPlayer(player) {
+      if (player === 1) {
+        window.location.href = "player1/index.html";
+      } else if (player === 2) {
+        window.location.href = "player2/index.html";
+      }
+    }
+  </script>
+</body>
+</html>
