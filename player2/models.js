@@ -1,4 +1,5 @@
 // models.js - Carregamento e gerenciamento de modelos 3D
+// Substitua o seu arquivo por este (backup primeiro).
 
 import { loadGLTF } from "./loader.js";
 import { modelPaths } from "./config.js";
@@ -7,11 +8,15 @@ const THREE = window.MINDAR.IMAGE.THREE;
 
 export class ModelManager {
   constructor() {
-    this.models = [];
-    this.anchors = [];
-    this.cloneCounts = {};
-    this.gameObjects = []; // Objetos adicionados durante o jogo (ON)
-    this.demoObjects = []; // Objetos adicionados durante demo (OFF)
+    this.models = [];         // modelos originais (GLTF)
+    this.anchors = [];        // anchors do MindAR
+    this.cloneCounts = {};    // contador de clones por índice
+    this.gameObjects = [];    // clones criados em modo JOGO (ON)
+    this.demoObjects = [];    // clones criados em modo DEMO (OFF)
+
+    // Grupos auxiliares por índice para separar objetos de demo e de jogo
+    this.gameGroups = [];     // gameGroups[i] => THREE.Group() para clones ON do modelo i
+    this.demoGroups = [];     // demoGroups[i] => THREE.Group() para clones OFF do modelo i
   }
 
   async loadModels() {
@@ -25,7 +30,8 @@ export class ModelManager {
 
   setupModels(mindarThree) {
     const positions = this._generateGridPositions();
-    
+
+    // Prepara cada modelo (posicionamento, userData, scale)
     this.models.forEach((model, i) => {
       model.scene.scale.set(0.13, 0.13, 0.13);
       model.scene.userData.originalScale = model.scene.scale.clone();
@@ -37,19 +43,43 @@ export class ModelManager {
       model.scene.userData.tapCount = 0;
       model.scene.userData.tapTimer = null;
       model.scene.userData.isGridModel = true;
-      
-      if (i >= 8 && i < 12) {
-        model.scene.userData.rotatable = true;
-        model.scene.userData.targetRotation = model.scene.rotation.z;
-      } else {
-        model.scene.userData.rotatable = false;
+
+      // Por segurança desativamos rotações automáticas (você pediu isso)
+      model.scene.userData.rotatable = false;
+      model.scene.userData.targetRotation = model.scene.rotation.z;
+
+      // --- Ajuste de profundidade (Z) para modelos específicos ---
+      // Garante que as imagens "loop2_molde.gltf" (índice 14) e "loop3_molde.gltf" (índice 15)
+      // fiquem ligeiramente mais atrás (menor z) para que as placas coloridas apareçam sobre elas.
+      // Ajuste sutil: deslocamento para trás de 0.03 unidades (suficiente para sobreposição).
+      if (i === 14 || i === 15) {
+        // aplicamos um deslocamento negativo no Z
+        model.scene.position.z = (model.scene.position.z || 0) - 0.15;
+        // atualiza a posição original também
+        model.scene.userData.originalPosition = model.scene.position.clone();
       }
     });
 
-    // Adiciona cada modelo a uma âncora AR
-    this.anchors = this.models.map(model => {
+    // Cria anchors e adiciona dois grupos filhos em cada anchor: demoGroup e gameGroup
+    this.anchors = this.models.map((model, i) => {
       const anchor = mindarThree.addAnchor(0);
+
+      // anexar o modelo original (grade) diretamente ao anchor
       anchor.group.add(model.scene);
+
+      // cria grupos para demo (OFF) e game (ON)
+      const demoGroup = new THREE.Group();
+      demoGroup.name = `demoGroup_${i}`;
+      anchor.group.add(demoGroup);
+
+      const gameGroup = new THREE.Group();
+      gameGroup.name = `gameGroup_${i}`;
+      anchor.group.add(gameGroup);
+
+      // assegura arrays indexados
+      this.demoGroups[i] = demoGroup;
+      this.gameGroups[i] = gameGroup;
+
       return anchor;
     });
 
@@ -70,7 +100,7 @@ export class ModelManager {
       positions.push([x, y, 0]);
     }
 
-    // Ajustes cirúrgicos
+    // Ajustes finais
     positions[14][0] += 0.15;
     positions[15][0] = positions[14][0];
     positions[15][1] = positions[14][1] - 0.3;
@@ -78,26 +108,42 @@ export class ModelManager {
     return positions;
   }
 
-  // ✅ addClone agora identifica se está em modo demo (OFF) ou jogo (ON)
+  /**
+   * Adiciona um clone do modelo identificado por modelIndex.
+   * - position: THREE.Vector3 (opcional) para posicionamento personalizado
+   * - isGameMode: boolean -> true = ON (jogo), false = OFF (demo)
+   *
+   * Clones criados em ON são adicionados em gameGroups[modelIndex] (interativos).
+   * Clones criados em OFF são adicionados em demoGroups[modelIndex] (imutáveis).
+   */
   addClone(modelIndex, position = null, isGameMode = false) {
+    if (!this.models[modelIndex]) {
+      console.warn(`ModelManager.addClone: modelIndex ${modelIndex} inválido.`);
+      return null;
+    }
+
     const originalModel = this.models[modelIndex].scene;
-    const clone = originalModel.clone();
-    
+    // clonagem profunda para preservar geometria/estrutura
+    const clone = originalModel.clone(true);
+
+    // userData do clone
     clone.userData = {
-      clickable: originalModel.userData.clickable,
-      rotatable: originalModel.userData.rotatable,
-      targetRotation: originalModel.userData.targetRotation,
-      originalScale: originalModel.userData.originalScale.clone(),
-      originalPosition: originalModel.userData.originalPosition.clone(),
-      originalRotation: originalModel.userData.originalRotation.clone(),
+      clickable: Boolean(originalModel.userData.clickable && isGameMode), // clicável apenas se for gameMode (ON)
+      rotatable: false, // rotatable desativado por requisito
+      targetRotation: originalModel.userData.targetRotation || 0,
+      originalScale: originalModel.userData.originalScale ? originalModel.userData.originalScale.clone() : originalModel.scale.clone(),
+      originalPosition: originalModel.userData.originalPosition ? originalModel.userData.originalPosition.clone() : originalModel.position.clone(),
+      originalRotation: originalModel.userData.originalRotation ? originalModel.userData.originalRotation.clone() : originalModel.rotation.clone(),
       modelIndex: originalModel.userData.modelIndex,
       isClone: true,
-      isGameMode: isGameMode, // ✅ Identifica se é objeto de jogo (ON) ou demo (OFF)
+      isGameMode: Boolean(isGameMode), // identifica se foi criado em ON (true) ou OFF (false)
       tapCount: 0,
-      tapTimer: null
+      tapTimer: null,
+      isGridModel: false
     };
-    
-    if (position) {
+
+    // posicionamento
+    if (position && position.isVector3) {
       clone.position.copy(position).add(new THREE.Vector3(0.3, -0.2, 0));
     } else {
       const cloneCount = this.cloneCounts[modelIndex]++;
@@ -107,15 +153,37 @@ export class ModelManager {
         originalModel.position.z
       );
     }
-    
-    this.anchors[modelIndex].group.add(clone);
-    
-    // ✅ Adiciona ao array apropriado
+
+    // Adiciona o clone ao grupo apropriado para manter separação de objetos
     if (isGameMode) {
+      // Garantir que exista o gameGroup
+      const grp = this.gameGroups[modelIndex];
+      if (grp) {
+        grp.add(clone);
+      } else {
+        // fallback: anexar no anchor.group (menos desejado, mas seguro)
+        this.anchors[modelIndex].group.add(clone);
+      }
+      // visível imediatamente no modo ON
+      clone.visible = true;
+      // armazenar
       this.gameObjects.push(clone);
     } else {
+      // demo (OFF) clones vão para demoGroup
+      const grp = this.demoGroups[modelIndex];
+      if (grp) {
+        grp.add(clone);
+      } else {
+        this.anchors[modelIndex].group.add(clone);
+      }
+      // esses clones serão visíveis apenas em OFF; durante o jogo (ON) devem ficar invisíveis
+      clone.visible = false;
+      // tornar não clicável/imutável
+      clone.userData.clickable = false;
       this.demoObjects.push(clone);
     }
+
+    return clone;
   }
 
   zoomIn() {
@@ -142,82 +210,91 @@ export class ModelManager {
     });
   }
 
-  // ✅ Reset diferente para OFF (demo) e ON (jogo)
+  /**
+   * Reset diferente para OFF (demo) e ON (jogo)
+   */
   resetModels(isGameMode = false) {
     if (isGameMode) {
-      // Reset em ON: limpa apenas objetos do jogo
+      // Reset em ON: limpa apenas objetos do jogo (gameGroups)
       this.gameObjects.forEach(obj => {
-        if (obj.parent) {
-          obj.parent.remove(obj);
-        }
+        if (obj.parent) obj.parent.remove(obj);
       });
       this.gameObjects = [];
+      // limpar também os children de gameGroups para garantir consistência
+      this.gameGroups.forEach(grp => {
+        if (grp && grp.children.length) {
+          while (grp.children.length) grp.remove(grp.children[0]);
+        }
+      });
     } else {
       // Reset em OFF: limpa objetos demo e restaura grid original
       this.demoObjects.forEach(obj => {
-        if (obj.parent) {
-          obj.parent.remove(obj);
-        }
+        if (obj.parent) obj.parent.remove(obj);
       });
       this.demoObjects = [];
-      
-      // Restaura grid original
-      this.models.forEach(model => {
-        model.scene.position.copy(model.scene.userData.originalPosition);
-        model.scene.rotation.copy(model.scene.userData.originalRotation);
-        model.scene.scale.copy(model.scene.userData.originalScale);
-        if (model.scene.userData.rotatable) {
-          model.scene.userData.targetRotation = model.scene.userData.originalRotation.z;
+      // limpar children de demoGroups
+      this.demoGroups.forEach(grp => {
+        if (grp && grp.children.length) {
+          while (grp.children.length) grp.remove(grp.children[0]);
         }
       });
+
+      // Restaura grid original
+      this.models.forEach(model => {
+        if (model.scene.userData.originalPosition) model.scene.position.copy(model.scene.userData.originalPosition);
+        if (model.scene.userData.originalRotation) model.scene.rotation.copy(model.scene.userData.originalRotation);
+        if (model.scene.userData.originalScale) model.scene.scale.copy(model.scene.userData.originalScale);
+        model.scene.userData.targetRotation = model.scene.userData.originalRotation ? model.scene.userData.originalRotation.z : model.scene.rotation.z;
+      });
     }
-    
+
     // Reseta contadores
     Object.keys(this.cloneCounts).forEach(key => {
       this.cloneCounts[key] = 0;
     });
   }
 
-  // ✅ Toggle visibilidade agora controla grid e objetos separadamente
+  /**
+   * Controla a visibilidade geral conforme o modo.
+   * - isGameMode = true  -> ON: grade oculta, demoGroups ocultos, gameGroups visíveis
+   * - isGameMode = false -> OFF: grade visível, demoGroups visíveis, gameGroups ocultos
+   */
   setGameMode(isGameMode) {
     if (isGameMode) {
-      // Modo ON (jogo): esconde grid e objetos demo, mostra objetos do jogo
+      // ON
       this.models.forEach(model => model.scene.visible = false);
-      this.demoObjects.forEach(obj => obj.visible = false);
-      this.gameObjects.forEach(obj => obj.visible = true);
+      // demoGroups off
+      this.demoGroups.forEach(grp => { if (grp) grp.visible = false; });
+      // gameGroups on
+      this.gameGroups.forEach(grp => { if (grp) grp.visible = true; });
     } else {
-      // Modo OFF (demo): mostra grid e objetos demo, esconde objetos do jogo
+      // OFF
       this.models.forEach(model => model.scene.visible = true);
-      this.demoObjects.forEach(obj => obj.visible = true);
-      this.gameObjects.forEach(obj => obj.visible = false);
+      this.demoGroups.forEach(grp => { if (grp) grp.visible = true; });
+      this.gameGroups.forEach(grp => { if (grp) grp.visible = false; });
     }
   }
 
   updateRotations() {
+    // Rotations dos modelos (se houver)
     this.models.forEach(model => {
-      if (model.scene.userData.rotatable) {
+      const target = model.scene.userData.targetRotation;
+      if (typeof target === "number") {
         const current = model.scene.rotation.z;
-        const target = model.scene.userData.targetRotation;
         const diff = target - current;
-        if (Math.abs(diff) > 0.01) {
-          model.scene.rotation.z += diff * 0.1;
-        } else {
-          model.scene.rotation.z = target;
-        }
+        if (Math.abs(diff) > 0.01) model.scene.rotation.z += diff * 0.1;
+        else model.scene.rotation.z = target;
       }
     });
-    
-    // Atualiza rotações de todos os clones
+
+    // Atualiza rotações dos clones caso algum tenha rotatable (por segurança)
     [...this.gameObjects, ...this.demoObjects].forEach(obj => {
-      if (obj.userData.rotatable) {
+      if (obj.userData && obj.userData.rotatable) {
         const current = obj.rotation.z;
-        const target = obj.userData.targetRotation;
+        const target = obj.userData.targetRotation || 0;
         const diff = target - current;
-        if (Math.abs(diff) > 0.01) {
-          obj.rotation.z += diff * 0.1;
-        } else {
-          obj.rotation.z = target;
-        }
+        if (Math.abs(diff) > 0.01) obj.rotation.z += diff * 0.1;
+        else obj.rotation.z = target;
       }
     });
   }
