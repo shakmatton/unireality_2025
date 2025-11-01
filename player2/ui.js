@@ -360,7 +360,7 @@ export class UIManager {
 
     btnSair.addEventListener("click", (e) => {
       e.stopPropagation();
-      window.location.href = "https://shakmatton.github.io/unireality";
+      window.location.href = "https://shakmatton.github.io/unireality_2025";
     });
     document.body.appendChild(btnSair);
   }
