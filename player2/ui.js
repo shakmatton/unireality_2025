@@ -1,20 +1,19 @@
 // ui.js - Interface do usuário (botões, ícones)
-// Versão atualizada: preserva tamanhos dos botões, adiciona "hand" e desloca
-// todos os elementos da coluna direita (exceto mandala) para baixo,
-// incluindo as plaquinhas criadas pela palette (platesContainer).
+// Atualizado: remove highlight/seleção azul em mobile adicionando CSS e atributos em imagens.
+// Substitua seu ui.js por este (faça backup primeiro).
 
 import { isMobile, TAP_DELAY } from "./config.js";
 
 export class UIManager {
   constructor(modelManager, paletteManager = null) {
     this.modelManager = modelManager;
-    this.paletteManager = paletteManager; // pode ser nulo inicialmente
+    this.paletteManager = paletteManager; // Pode ser null inicialmente
     this.isGameActive = false; // false = OFF (demo), true = ON (jogo)
 
-    // Guardar referências dos ícones à direita (estes serão deslocados)
+    // Guardar referências dos ícones à direita para poder esconder/exibir
     this._sideIcons = [];
 
-    // referências para elementos importantes
+    // referências para elementos especiais
     this._els = {
       btnOnOff: null,
       btnReset: null,
@@ -28,6 +27,28 @@ export class UIManager {
   }
 
   init() {
+    // Inject small global CSS to disable mobile tap highlight and outlines on images/buttons
+    // This avoids the "blue selection" on mobile when tapping icons.
+    if (!document.getElementById("unireality-ui-fix-style")) {
+      const style = document.createElement("style");
+      style.id = "unireality-ui-fix-style";
+      style.innerHTML = `
+        /* Remove blue tap highlight on mobile for images & buttons */
+        img, button {
+          -webkit-tap-highlight-color: transparent;
+          -webkit-touch-callout: none;
+          outline: none !important;
+          user-select: none !important;
+          -webkit-user-select: none !important;
+          -ms-user-select: none !important;
+        }
+        img:focus, button:focus { outline: none !important; }
+        /* Ensure images aren't draggable (ghost image) */
+        img[draggable="false"] { -webkit-user-drag: none; -webkit-touch-callout: none; }
+      `;
+      document.head.appendChild(style);
+    }
+
     this._createBottomUI();
     this._createSideMenu();
     this._createMandalaButton();
@@ -115,10 +136,7 @@ export class UIManager {
     });
     container.appendChild(btnOnOff);
     this._els.btnOnOff = btnOnOff;
-
-    // Preserva o tamanho padrão (se o seu arquivo original definia tamanhos, mantenha-os)
-    // Se você quiser forçar tamanhos específicos, modifique aqui — por enquanto não forçamos.
-
+    
     // Ajuste específico de tamanho (somente ON/OFF) - valores conservadores
     // Desktop: 42px, Mobile: 36px
     btnOnOff.style.width = isMobile ? "60px" : "60px";
@@ -133,9 +151,7 @@ export class UIManager {
     container.appendChild(btnReset);
     this._els.btnReset = btnReset;
 
-    // Não forçamos width/height aqui — preservamos o comportamento visual original.
-
-     // Ajuste específico de tamanho (somente RESET) - valores conservadores (desktop a combinar com ON/OFF)
+    // Ajuste específico de tamanho (somente RESET) - valores conservadores (desktop a combinar com ON/OFF)
     btnReset.style.width = isMobile ? "76px" : "72px";
     btnReset.style.height = isMobile ? "32px" : "35px";
   }
@@ -157,6 +173,16 @@ export class UIManager {
       icon.style.height = "auto";
       icon.style.cursor = "pointer";
       icon.style.zIndex = "1000";
+
+      // avoid default focus/drag highlights:
+      icon.setAttribute("draggable", "false");
+      icon.tabIndex = -1;
+      icon.style.outline = "none";
+      icon.style.touchAction = "manipulation";
+      // stop selection on touch devices
+      icon.style.userSelect = "none";
+      icon.style.webkitUserSelect = "none";
+
       icon.addEventListener("click", (e) => {
         e.stopPropagation();
         // se não estivermos em modo ON, bloqueia com feedback visual
@@ -173,18 +199,18 @@ export class UIManager {
     };
 
     // Posições originais (sem shift)
-    const coleteTop = isMobile ? "290px" : "320px";
     const recicleTop = isMobile ? "360px" : "390px";
+    const coleteTop = isMobile ? "290px" : "320px";
     const loop2Top = isMobile ? "460px" : "470px";
     const loop3Top = isMobile ? "510px" : "520px";
 
     // Ícone Recicle (index 13)
-    makeAndStoreIconWithPos("./gltf/imgs/recicle.png", "Recicle", recicleTop, "41px", () => {
+    makeAndStoreIconWithPos("./gltf/imgs/recicle.png", "Recicle", recicleTop, "40px", () => {
       if (this.modelManager) this.modelManager.addClone(13, null, true);
     });
 
     // Ícone Colete (index 12)
-    makeAndStoreIconWithPos("./gltf/imgs/colete2.png", "Colete", coleteTop, "41px", () => {
+    makeAndStoreIconWithPos("./gltf/imgs/colete2.png", "Colete", coleteTop, "42px", () => {
       if (this.modelManager) this.modelManager.addClone(12, null, true);
     });
 
@@ -197,9 +223,6 @@ export class UIManager {
     makeAndStoreIconWithPos("./gltf/imgs/loop-3.png", "Loop 3", loop3Top, "40px", () => {
       if (this.modelManager) this.modelManager.addClone(15, null, true);
     });
-
-    // Observação: não adicionamos a mandala aqui; ela será criada em _createMandalaButton e NÃO entra
-    // em _sideIcons — assim a mandala NÃO será deslocada pelo SHIFT.
   }
 
   // Aplica visibilidade show/hide para a coluna direita
@@ -253,6 +276,12 @@ export class UIManager {
     btnMandala.style.transition = "transform 0.3s ease";
     btnMandala.style.zIndex = "1000";
 
+    // avoid highlight/drag on mandala too
+    btnMandala.setAttribute("draggable", "false");
+    btnMandala.tabIndex = -1;
+    btnMandala.style.outline = "none";
+    btnMandala.style.touchAction = "manipulation";
+
     btnMandala.addEventListener("pointerdown", (e) => { e.stopPropagation(); });
     btnMandala.addEventListener("pointerup", (e) => {
       e.stopPropagation();
@@ -294,15 +323,21 @@ export class UIManager {
     handImg.title = "Toque na mandala para girar";
     handImg.style.position = "absolute";
 
-    // --- Linha que configura a posição vertical da mão ---
-    handImg.style.top = "50px"; // <--- se quiser mover a mão, altere este valor (por exemplo "50px" ou "75px")
-    // ------------------------------------------------------
-
+    // posição vertical (ajuste conforme desejar)
+    handImg.style.top = "50px";
     handImg.style.right = "10px";
     handImg.style.width = isMobile ? "40px" : "40px";
     handImg.style.height = "auto";
     handImg.style.zIndex = "1000";
-    handImg.style.pointerEvents = "none"; // informativo apenas, não bloqueia cliques na mandala
+
+    // hand is purely informative: do not capture pointer events
+    handImg.style.pointerEvents = "none";
+
+    // ensure no selection / highlight
+    handImg.setAttribute("draggable", "false");
+    handImg.tabIndex = -1;
+    handImg.style.outline = "none";
+
     document.body.appendChild(handImg);
     this._els.handIcon = handImg;
   }
@@ -317,9 +352,15 @@ export class UIManager {
     btnSair.style.position = "absolute";
     btnSair.style.top = "10px";
     btnSair.style.left = "10px";
+
+    // avoid highlight/drag
+    btnSair.setAttribute("draggable", "false");
+    btnSair.tabIndex = -1;
+    btnSair.style.outline = "none";
+
     btnSair.addEventListener("click", (e) => {
       e.stopPropagation();
-      window.location.href = "https://shakmatton.github.io/unireality_2025/";
+      window.location.href = "https://shakmatton.github.io/unireality";
     });
     document.body.appendChild(btnSair);
   }
@@ -334,6 +375,14 @@ export class UIManager {
     btn.style.cursor = "pointer";
     btn.style.width = isMobile ? "32px" : "35px";
     btn.style.height = isMobile ? "32px" : "35px";
+
+    // avoid default highlight/drag
+    btn.setAttribute("draggable", "false");
+    btn.tabIndex = -1;
+    btn.style.outline = "none";
+    btn.style.touchAction = "manipulation";
+    btn.style.userSelect = "none";
+
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
       onClick();
@@ -351,6 +400,14 @@ export class UIManager {
     icon.style.width = width || "40px";
     icon.style.height = "auto";
     icon.style.cursor = "pointer";
+
+    // avoid default highlight/drag
+    icon.setAttribute("draggable", "false");
+    icon.tabIndex = -1;
+    icon.style.outline = "none";
+    icon.style.touchAction = "manipulation";
+    icon.style.userSelect = "none";
+
     icon.addEventListener("click", (e) => {
       e.stopPropagation();
       onClick(e);
@@ -384,11 +441,14 @@ export class UIManager {
     if (this.paletteManager) {
       const pc = this.paletteManager.platesContainer;
       if (pc) {
-        // se platesContainer foi configurado com estilo top em px (como no seu palette.js)
         try {
           const currentTop = pc.style.top || window.getComputedStyle(pc).top || (isMobile ? "125px" : "145px");
           const n = parseInt(currentTop, 10) || (isMobile ? 125 : 145);
           pc.style.top = `${n + SHIFT}px`;
+          // ensure platesContainer cannot be highlighted or dragged by browsers
+          pc.style.userSelect = "none";
+          pc.style.webkitUserSelect = "none";
+          pc.style.touchAction = "manipulation";
         } catch (e) {}
       }
 
@@ -398,6 +458,9 @@ export class UIManager {
           const currentTop = tb.style.top || window.getComputedStyle(tb).top || (isMobile ? "60px" : "80px");
           const n = parseInt(currentTop, 10) || (isMobile ? 60 : 80);
           tb.style.top = `${n + SHIFT}px`;
+          tb.setAttribute("draggable", "false");
+          tb.tabIndex = -1;
+          tb.style.outline = "none";
         } catch (e) {}
       }
     }

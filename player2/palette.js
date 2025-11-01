@@ -1,5 +1,5 @@
 // palette.js - Gerenciamento da paleta de cores e plaquinhas
-// Substitua seu arquivo palette.js por este (backup primeiro).
+// Pequenas mudanças: imagens criadas com draggable="false", tabIndex=-1, e estilos para evitar highlight.
 
 import { isMobile, trashBinImages, platesMapping, plateModelIndices } from "./config.js";
 
@@ -26,6 +26,10 @@ export class PaletteManager {
     this.platesContainer.style.flexDirection = "column";
     this.platesContainer.style.gap = "5px";
     this.platesContainer.style.zIndex = "1000";
+    // avoid selection/highlight for the container
+    this.platesContainer.style.userSelect = "none";
+    this.platesContainer.style.webkitUserSelect = "none";
+    this.platesContainer.style.touchAction = "manipulation";
     document.body.appendChild(this.platesContainer);
   }
 
@@ -39,6 +43,10 @@ export class PaletteManager {
     this.trashBinImg.style.height = "auto";
     this.trashBinImg.style.display = "none";
     this.trashBinImg.style.zIndex = "1000";
+    // prevent highlight/drag
+    this.trashBinImg.setAttribute("draggable", "false");
+    this.trashBinImg.tabIndex = -1;
+    this.trashBinImg.style.outline = "none";
     document.body.appendChild(this.trashBinImg);
   }
 
@@ -56,20 +64,21 @@ export class PaletteManager {
       icon.style.width = isMobile ? "41px" : "40px";
       icon.style.cursor = "pointer";
 
-      // Clique só cria clone se estivermos em modo JOGO (ON)
+      // Avoid highlight/drag/focus
+      icon.setAttribute("draggable", "false");
+      icon.tabIndex = -1;
+      icon.style.outline = "none";
+      icon.style.touchAction = "manipulation";
+      icon.style.userSelect = "none";
+      icon.style.webkitUserSelect = "none";
+
       icon.addEventListener("click", (e) => {
         e.stopPropagation();
-        const isGameMode = this.uiManager && typeof this.uiManager.getGameMode === "function" ? this.uiManager.getGameMode() : false;
-        if (!isGameMode) {
-          // Bloqueia criação em OFF; pequeno feedback visual
-          icon.style.opacity = "0.5";
-          setTimeout(() => icon.style.opacity = "1", 120);
-          return;
-        }
         const modelIndex = plateModelIndices[this.currentColorIndex][type];
-        this.modelManager.addClone(modelIndex, null, true);
+        // Passa o modo atual (demo/jogo) para addClone
+        const isGameMode = this.uiManager && typeof this.uiManager.getGameMode === "function" ? this.uiManager.getGameMode() : false;
+        this.modelManager.addClone(modelIndex, null, isGameMode);
       });
-
       this.platesContainer.appendChild(icon);
     });
   }

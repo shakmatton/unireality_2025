@@ -1,5 +1,5 @@
-// models.js - Carregamento e gerenciamento de modelos 3D
-// Substitua o seu arquivo por este (backup primeiro).
+// models.js - carregamento e gerenciamento de modelos 3D
+// Alterações: fixa z dos modelos/clones; recua slightly loop2/loop3 para evitar Z-fighting
 
 import { loadGLTF } from "./loader.js";
 import { modelPaths } from "./config.js";
@@ -35,30 +35,38 @@ export class ModelManager {
     this.models.forEach((model, i) => {
       model.scene.scale.set(0.13, 0.13, 0.13);
       model.scene.userData.originalScale = model.scene.scale.clone();
-      model.scene.position.set(...positions[i]);
+
+      // set position X/Y/Z from positions; keep Z default 0 unless specified below
+      const [x, y, z] = [positions[i][0], positions[i][1], (positions[i].length > 2 ? positions[i][2] : 0)];
+      model.scene.position.set(x, y, z);
       model.scene.userData.originalPosition = model.scene.position.clone();
       model.scene.userData.originalRotation = model.scene.rotation.clone();
+
       model.scene.userData.clickable = true;
       model.scene.userData.modelIndex = i;
       model.scene.userData.tapCount = 0;
       model.scene.userData.tapTimer = null;
       model.scene.userData.isGridModel = true;
 
-      // Por segurança desativamos rotações automáticas (você pediu isso)
+      // desativar rotações automáticas por padrão
       model.scene.userData.rotatable = false;
       model.scene.userData.targetRotation = model.scene.rotation.z;
 
-      // --- Ajuste de profundidade (Z) para modelos específicos ---
-      // Garante que as imagens "loop2_molde.gltf" (índice 14) e "loop3_molde.gltf" (índice 15)
-      // fiquem ligeiramente mais atrás (menor z) para que as placas coloridas apareçam sobre elas.
-      // Ajuste sutil: deslocamento para trás de 0.03 unidades (suficiente para sobreposição).
-      if (i === 14 || i === 15) {
-        // aplicamos um deslocamento negativo no Z
-        model.scene.position.z = (model.scene.position.z || 0) - 0.15;
-        // atualiza a posição original também
-        model.scene.userData.originalPosition = model.scene.position.clone();
-      }
+      // store current Z as fixedZ (will be used by clones / drag locking)
+      model.scene.userData.fixedZ = model.scene.position.z;
     });
+
+    // Specific tweak: move loop molds slightly backwards in Z so plates appear in front
+    // ASSUMPTION: loop2 is at model index 14 and loop3 at index 15 (per your modelPaths order)
+    const loopBackOffset = -0.03; // small negative Z to push them slightly "back"
+    if (this.models[14]) {
+      this.models[14].scene.position.z = (this.models[14].scene.position.z || 0) + loopBackOffset;
+      this.models[14].scene.userData.fixedZ = this.models[14].scene.position.z;
+    }
+    if (this.models[15]) {
+      this.models[15].scene.position.z = (this.models[15].scene.position.z || 0) + loopBackOffset;
+      this.models[15].scene.userData.fixedZ = this.models[15].scene.position.z;
+    }
 
     // Cria anchors e adiciona dois grupos filhos em cada anchor: demoGroup e gameGroup
     this.anchors = this.models.map((model, i) => {
@@ -123,26 +131,25 @@ export class ModelManager {
     }
 
     const originalModel = this.models[modelIndex].scene;
-    // clonagem profunda para preservar geometria/estrutura
     const clone = originalModel.clone(true);
 
-    // userData do clone
+    // ensure clone keeps transforms similar to original
     clone.userData = {
-      clickable: Boolean(originalModel.userData.clickable && isGameMode), // clicável apenas se for gameMode (ON)
-      rotatable: false, // rotatable desativado por requisito
+      clickable: Boolean(originalModel.userData.clickable && isGameMode),
+      rotatable: Boolean(originalModel.userData.rotatable),
       targetRotation: originalModel.userData.targetRotation || 0,
       originalScale: originalModel.userData.originalScale ? originalModel.userData.originalScale.clone() : originalModel.scale.clone(),
       originalPosition: originalModel.userData.originalPosition ? originalModel.userData.originalPosition.clone() : originalModel.position.clone(),
       originalRotation: originalModel.userData.originalRotation ? originalModel.userData.originalRotation.clone() : originalModel.rotation.clone(),
       modelIndex: originalModel.userData.modelIndex,
       isClone: true,
-      isGameMode: Boolean(isGameMode), // identifica se foi criado em ON (true) ou OFF (false)
+      isGameMode: Boolean(isGameMode),
       tapCount: 0,
       tapTimer: null,
-      isGridModel: false
+      isGridModel: false,
+      fixedZ: typeof originalModel.userData.fixedZ !== "undefined" ? originalModel.userData.fixedZ : originalModel.position.z
     };
 
-    // posicionamento
     if (position && position.isVector3) {
       clone.position.copy(position).add(new THREE.Vector3(0.3, -0.2, 0));
     } else {
@@ -154,34 +161,38 @@ export class ModelManager {
       );
     }
 
-    // Adiciona o clone ao grupo apropriado para manter separação de objetos
+    // FORCE clone Z to match original fixedZ -- prevents clones from drifting in depth
+    if (typeof clone.userData.fixedZ !== "undefined") {
+      // convert to parent's local Z if needed (but here position.z is local)
+      clone.position.z = clone.userData.fixedZ;
+    }
+
+    // Add clone to proper group
     if (isGameMode) {
-      // Garantir que exista o gameGroup
       const grp = this.gameGroups[modelIndex];
       if (grp) {
         grp.add(clone);
       } else {
-        // fallback: anexar no anchor.group (menos desejado, mas seguro)
         this.anchors[modelIndex].group.add(clone);
       }
-      // visível imediatamente no modo ON
       clone.visible = true;
-      // armazenar
+      // ensure clone is interactive
+      clone.userData.clickable = true;
       this.gameObjects.push(clone);
     } else {
-      // demo (OFF) clones vão para demoGroup
       const grp = this.demoGroups[modelIndex];
       if (grp) {
         grp.add(clone);
       } else {
         this.anchors[modelIndex].group.add(clone);
       }
-      // esses clones serão visíveis apenas em OFF; durante o jogo (ON) devem ficar invisíveis
       clone.visible = false;
-      // tornar não clicável/imutável
       clone.userData.clickable = false;
       this.demoObjects.push(clone);
     }
+
+    // OPTIONAL: set a renderOrder small tweak if needed (commented)
+    // clone.traverse((c) => { if (c.isMesh) c.renderOrder = 0; });
 
     return clone;
   }
@@ -210,36 +221,28 @@ export class ModelManager {
     });
   }
 
-  /**
-   * Reset diferente para OFF (demo) e ON (jogo)
-   */
   resetModels(isGameMode = false) {
     if (isGameMode) {
-      // Reset em ON: limpa apenas objetos do jogo (gameGroups)
       this.gameObjects.forEach(obj => {
         if (obj.parent) obj.parent.remove(obj);
       });
       this.gameObjects = [];
-      // limpar também os children de gameGroups para garantir consistência
       this.gameGroups.forEach(grp => {
         if (grp && grp.children.length) {
           while (grp.children.length) grp.remove(grp.children[0]);
         }
       });
     } else {
-      // Reset em OFF: limpa objetos demo e restaura grid original
       this.demoObjects.forEach(obj => {
         if (obj.parent) obj.parent.remove(obj);
       });
       this.demoObjects = [];
-      // limpar children de demoGroups
       this.demoGroups.forEach(grp => {
         if (grp && grp.children.length) {
           while (grp.children.length) grp.remove(grp.children[0]);
         }
       });
 
-      // Restaura grid original
       this.models.forEach(model => {
         if (model.scene.userData.originalPosition) model.scene.position.copy(model.scene.userData.originalPosition);
         if (model.scene.userData.originalRotation) model.scene.rotation.copy(model.scene.userData.originalRotation);
@@ -248,27 +251,17 @@ export class ModelManager {
       });
     }
 
-    // Reseta contadores
     Object.keys(this.cloneCounts).forEach(key => {
       this.cloneCounts[key] = 0;
     });
   }
 
-  /**
-   * Controla a visibilidade geral conforme o modo.
-   * - isGameMode = true  -> ON: grade oculta, demoGroups ocultos, gameGroups visíveis
-   * - isGameMode = false -> OFF: grade visível, demoGroups visíveis, gameGroups ocultos
-   */
   setGameMode(isGameMode) {
     if (isGameMode) {
-      // ON
       this.models.forEach(model => model.scene.visible = false);
-      // demoGroups off
       this.demoGroups.forEach(grp => { if (grp) grp.visible = false; });
-      // gameGroups on
       this.gameGroups.forEach(grp => { if (grp) grp.visible = true; });
     } else {
-      // OFF
       this.models.forEach(model => model.scene.visible = true);
       this.demoGroups.forEach(grp => { if (grp) grp.visible = true; });
       this.gameGroups.forEach(grp => { if (grp) grp.visible = false; });
@@ -276,7 +269,6 @@ export class ModelManager {
   }
 
   updateRotations() {
-    // Rotations dos modelos (se houver)
     this.models.forEach(model => {
       const target = model.scene.userData.targetRotation;
       if (typeof target === "number") {
@@ -287,7 +279,6 @@ export class ModelManager {
       }
     });
 
-    // Atualiza rotações dos clones caso algum tenha rotatable (por segurança)
     [...this.gameObjects, ...this.demoObjects].forEach(obj => {
       if (obj.userData && obj.userData.rotatable) {
         const current = obj.rotation.z;

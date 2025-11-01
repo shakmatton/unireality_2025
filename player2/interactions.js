@@ -1,7 +1,6 @@
 // interactions.js
-// Versão robusta para drag em touch/mouse (pointer-capture, touch-action:none, smoothing)
-// Mantém um parâmetro de sensibilidade (_defaultTouchSensitivity) que você pode ajustar
-// sem causar efeitos colaterais. Logs discretos para debug (console.debug).
+// Versão: bloqueio do movimento em Z (2D-only drag) + pointer-capture + smoothing
+// Mantém double-tap para remoção (2 taps) conforme sua versão recente.
 
 import { TAP_DELAY } from "./config.js";
 
@@ -23,22 +22,21 @@ export class InteractionManager {
     this.initialPointerPos = new THREE.Vector2();
     this.hasMoved = false;
 
+    // keep the locked local Z for the dragging object (to ensure 2D movement)
+    this._draggingObjectInitialLocalZ = 0;
+
     // Tap state for removal (double-tap)
     this.tapData = new Map();
 
-    // Sensitivity (default 1.0). Valores maiores -> arraste mais "amplificado".
-    // Você pode ajustar em runtime via `interactionManager.setSensitivity(x)`.
+    // Sensitivity & smoothing
     this._defaultTouchSensitivity = typeof opts.sensitivity === "number" ? opts.sensitivity : 1.0;
-
-    // smoothing factor: 0..1; quanto maior mais "grudento" o objeto (0.9 é quase sem atraso)
     this._smoothing = typeof opts.smoothing === "number" ? opts.smoothing : 0.9;
 
-    // throttled logs
+    // logging throttle
     this._lastMoveLog = 0;
-    this._moveLogInterval = 250; // ms
+    this._moveLogInterval = 250;
   }
 
-  // opcional: ajustar sensibilidade em runtime
   setSensitivity(v) {
     const n = Number(v) || 1.0;
     this._defaultTouchSensitivity = Math.max(0.1, Math.min(12, n));
@@ -46,22 +44,17 @@ export class InteractionManager {
   }
 
   init() {
-    // prevenir gestos nativos que atrapalham o pointer (scroll, swipe)
-    try { document.body.style.touchAction = "none"; } catch (e) {}
+    try { document.body.style.touchAction = "none"; } catch (e) { /* ignore */ }
 
-    // registrando listeners preferencialmente com passive:false para permitir preventDefault
     document.body.addEventListener("pointerdown", (e) => this._onPointerDown(e), { passive: false });
     document.body.addEventListener("pointermove", (e) => this._onPointerMove(e), { passive: false });
     document.body.addEventListener("pointerup", (e) => this._onPointerUp(e), { passive: false });
     document.body.addEventListener("pointercancel", (e) => this._onPointerUp(e), { passive: false });
 
-    // compatibilidade: touch fallback (não ideal se pointer events existirem)
-    document.body.addEventListener("touchstart", (e) => { /* noop - pointer handles it */ }, { passive: false });
-
-    console.debug("[IM] init (touch-action:none, listeners attached). sensitivity=", this._defaultTouchSensitivity);
+    // keep console debug for diagnosis
+    console.debug("[IM] init (touch-action:none). sensitivity=", this._defaultTouchSensitivity);
   }
 
-  // Normaliza coordenadas para NDC
   _getNormalizedPointer(event) {
     const clientX = (typeof event.clientX === "number") ? event.clientX :
                     (event.touches && event.touches[0] && event.touches[0].clientX) || 0;
@@ -74,7 +67,6 @@ export class InteractionManager {
     };
   }
 
-  // Coleta meshes interativos (gameGroups)
   _collectInteractiveObjects() {
     const objects = [];
     try {
@@ -95,7 +87,6 @@ export class InteractionManager {
     return objects;
   }
 
-  // Sobe na hierarquia até achar userData.clickable e userData.isGameMode
   _findClickableParent(object) {
     let cur = object;
     while (cur) {
@@ -106,15 +97,14 @@ export class InteractionManager {
   }
 
   _onPointerDown(event) {
-    // Ignora cliques em UI imagens/botões
     try {
       if (event.target && (event.target.tagName === "IMG" || (event.target.closest && event.target.closest("#uiContainerBottom")))) {
         return;
       }
-    } catch (e) { /* ignore */ }
+    } catch (e) {}
 
     try { event.preventDefault(); } catch (e) {}
-    // pointer capture para garantir receber pointermove/up mesmo se o dedo sair do elemento
+
     try {
       if (typeof event.pointerId === "number" && event.target && event.target.setPointerCapture) {
         event.target.setPointerCapture(event.pointerId);
@@ -131,7 +121,6 @@ export class InteractionManager {
     const pickables = this._collectInteractiveObjects();
     if (!pickables || pickables.length === 0) {
       this.draggingObject = null;
-      console.debug("[IM] pointerdown - no pickables");
       return;
     }
 
@@ -146,33 +135,39 @@ export class InteractionManager {
     const clickable = this._findClickableParent(intersects[0].object);
     if (!clickable) {
       this.draggingObject = null;
-      console.debug("[IM] pointerdown - no clickable parent");
       return;
     }
 
-    // Iniciar drag
     this.draggingObject = clickable;
 
-    // calcula world position do objeto e cria plano perpendicular à câmera
+    // store initial local Z to lock depth during drag
+    // get local z relative to parent
+    const parent = clickable.parent;
+    if (parent) {
+      // ensure worldToLocal works: compute current world position and convert to parent local
+      const worldPos = new THREE.Vector3();
+      clickable.getWorldPosition(worldPos);
+      const localPos = parent.worldToLocal(worldPos.clone());
+      this._draggingObjectInitialLocalZ = localPos.z;
+    } else {
+      this._draggingObjectInitialLocalZ = clickable.position.z;
+    }
+
+    // plane perpendicular to camera, passing through object world position
     const worldPos = new THREE.Vector3();
     clickable.getWorldPosition(worldPos);
-
     const cameraDir = new THREE.Vector3();
     this.camera.getWorldDirection(cameraDir);
-
     this.dragPlane.setFromNormalAndCoplanarPoint(cameraDir.clone().negate(), worldPos);
 
-    // interseção atual do raio com o plano
     const intersectionPoint = new THREE.Vector3();
     this.raycaster.ray.intersectPlane(this.dragPlane, intersectionPoint);
-
-    // offset = worldPos - intersectionPoint
     this.dragOffset.copy(worldPos).sub(intersectionPoint);
 
-    // marca possível double-tap
+    // register tap for removal (double-tap)
     this._registerTap(clickable);
 
-    console.debug("[IM] drag started", { uuid: clickable.uuid, sens: this._defaultTouchSensitivity });
+    console.debug("[IM] drag started", { uuid: clickable.uuid, fixedLocalZ: this._draggingObjectInitialLocalZ });
   }
 
   _onPointerMove(event) {
@@ -182,22 +177,19 @@ export class InteractionManager {
     const coords = this._getNormalizedPointer(event);
     this.pointer.set(coords.x, coords.y);
 
-    // detecta movimento mínimo
     const dx = coords.x - this.initialPointerPos.x;
     const dy = coords.y - this.initialPointerPos.y;
     const distance = Math.sqrt(dx*dx + dy*dy);
     if (distance > 0.01) this.hasMoved = true;
 
-    // atualiza ray e interseção
     this.raycaster.setFromCamera(this.pointer, this.camera);
     const intersectionPoint = new THREE.Vector3();
     const ok = this.raycaster.ray.intersectPlane(this.dragPlane, intersectionPoint);
     if (!ok) return;
 
-    // desired world pos = intersectionPoint + dragOffset
     const desiredWorld = intersectionPoint.clone().add(this.dragOffset);
 
-    // Convertemos para coordenadas locais do parent do objeto
+    // convert to local coordinates of parent to get local x,y and preserve local z
     const parent = this.draggingObject.parent;
     let desiredLocal;
     if (parent) {
@@ -206,30 +198,27 @@ export class InteractionManager {
       desiredLocal = desiredWorld.clone();
     }
 
-    // Aplica sensibilidade como factor de suavização + escalonamento do delta
-    // Em vez de multiplicar posição absoluta (que pode saltar), fazemos lerp do local atual -> desiredLocal
-    // weight depende de smoothing e sensitivity. Valores altos de sensitivity => mais responsivo.
+    // LOCK Z: enforce the stored local Z (so the object will not move towards/away)
+    desiredLocal.z = this._draggingObjectInitialLocalZ;
+
+    // smoothing/lerp applied to position to avoid jumps
     const sensitivity = Math.max(0.1, Math.min(12, this._defaultTouchSensitivity));
-    const smoothingFactor = Math.max(0.01, Math.min(0.99, this._smoothing)); // ex 0.9
-    // combinação: blend = lerpWeight = 1 - (0.3 / sensitivity) clamped -> mas queremos que sens=1 seja responsivo
-    // Vamos usar blend = smoothingFactor * (0.8 + 0.2 * (sensitivity / 4))
+    const smoothingFactor = Math.max(0.01, Math.min(0.99, this._smoothing));
     const blend = Math.min(0.98, Math.max(0.05, smoothingFactor * (0.8 + 0.05 * Math.log(sensitivity + 1))));
-    // Aplica lerp
+
     try {
       this.draggingObject.position.lerp(desiredLocal, blend);
     } catch (err) {
-      // fallback assign direto
       this.draggingObject.position.copy(desiredLocal);
     }
 
-    // logs throttled
+    // throttle logs
     const now = Date.now();
     if (now - this._lastMoveLog > this._moveLogInterval) {
       console.debug("[IM] dragging", {
         uuid: this.draggingObject.uuid,
-        desiredWorld: desiredWorld.toArray().map(n => n.toFixed(3)),
-        localPos: this.draggingObject.position.toArray().map(n => n.toFixed(3)),
-        sens: this._defaultTouchSensitivity,
+        localPos: this.draggingObject.position.toArray().map(n=>n.toFixed(3)),
+        fixedLocalZ: this._draggingObjectInitialLocalZ,
         blend: blend.toFixed(3)
       });
       this._lastMoveLog = now;
@@ -237,7 +226,6 @@ export class InteractionManager {
   }
 
   _onPointerUp(event) {
-    // libera pointer capture se possível
     try {
       if (typeof event.pointerId === "number" && event.target && event.target.releasePointerCapture) {
         event.target.releasePointerCapture(event.pointerId);
@@ -265,7 +253,8 @@ export class InteractionManager {
       data.lastTap = now;
       if (data.timer) clearTimeout(data.timer);
 
-      if (data.count >= 2) { // double-tap remove
+      // NOTE: you previously had triple-tap; per your last requests, we use 2-tap removal
+      if (data.count >= 2) {
         console.debug("[IM] double-tap remove", id);
         this._removeObject(object);
         this.tapData.delete(id);
